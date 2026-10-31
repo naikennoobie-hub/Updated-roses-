@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Eternal Bloom</title>
+<style>
+  html,body{margin:0;height:100%;background:#000;color:#ccc;font:12px system-ui,sans-serif;overflow:hidden;touch-action:none}
+  canvas{display:block;position:fixed;inset:0;width:100%;height:100%}
+  #ui{position:fixed;left:0;right:0;bottom:0;display:flex;flex-wrap:wrap;gap:4px;padding:6px 6px calc(6px + env(safe-area-inset-bottom));background:linear-gradient(transparent,rgba(0,0,0,.85) 40%);z-index:2}
+  #ui.hide{display:none}
+  button,select,input{background:rgba(0,0,0,.6);color:#ddd;border:1px solid #666;border-radius:3px;font:inherit;padding:6px 8px;min-height:32px}
+  button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid #e44;outline-offset:1px}
+  button.on{background:#ddd;color:#000}
+  label{display:flex;align-items:center;gap:4px}
+  input[type=range]{width:78px;padding:0}
+  input[type=text]{width:90px}
+  #st{position:fixed;top:8px;left:8px;z-index:2;color:#999;letter-spacing:.1em}
+  #msg{position:fixed;top:28px;left:8px;right:60px;z-index:2;color:#e88}
+  #tag{position:fixed;right:10px;bottom:8px;z-index:1;text-align:right;color:#aaa;font:11px/1.5 monospace;letter-spacing:.06em;pointer-events:none}
+  #note{position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:1;color:#888;font:11px monospace;letter-spacing:.08em;pointer-events:none;white-space:nowrap}
+  #cust{position:fixed;right:6px;top:38px;z-index:2;background:rgba(0,0,0,.5);border:1px solid #444;border-radius:4px;padding:8px;display:grid;gap:6px;max-height:calc(100vh - 130px);overflow:auto;backdrop-filter:blur(4px)}
+  #cust.hide{display:none}
+  #cust label{justify-content:space-between;gap:10px}
+  input[type=color]{padding:0;width:44px;height:28px;min-height:0}
+  #tog{position:fixed;top:6px;right:6px;z-index:3;opacity:.6}
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="tag">DEMO TEST 2023 /nov/23<br>HOME/AIKEN/FOLDERS/SELF PROJECT</div>
+<div id="note">enjoy configuring</div>
+<div id="st"></div><div id="msg"></div>
+<button id="tog" aria-label="Show or hide controls">UI</button>
+<div id="ui" role="toolbar" aria-label="Controls">
+  <button id="bCust" aria-label="Open or close the flower customizer">Customize</button>
+  <button id="bPlay" aria-label="Pause or play the automatic sequence">Pause</button>
+  <button id="bRose">Form Flower</button><button id="bScat">Scatter</button>
+  <button id="bReset">Reset</button><button id="bCam">Reset Camera</button>
+  <button id="bInt" class="on">Interaction: on</button><button id="bFs">Fullscreen</button>
+  <label>Particles <select id="cnt"><option>3000</option><option>6000</option><option>12000</option><option>20000</option></select></label>
+  <label>Size <input id="size" type="range" min="0.5" max="2.5" step="0.1" value="1"></label>
+  <label>Speed <input id="spd" type="range" min="0.4" max="2.5" step="0.1" value="1"></label>
+  <label>Scatter <input id="sca" type="range" min="2" max="14" step="0.5" value="7"></label>
+</div>
+
+<div id="cust" role="group" aria-label="Flower customization">
+  <label>Flower <select id="fType"><option value="rose">Rose</option><option value="tulip">Tulip</option><option value="daisy">Daisy</option><option value="sunflower">Sunflower</option><option value="dandelion">Dandelion</option><option value="lily">Lily</option><option value="lavender">Lavender</option></select></label>
+  <label>Flower heads <input type="range" id="fHeads" min="1" max="5" step="1"></label>
+  <label>Petals <input type="color" id="fPetal"></label>
+  <label>Petal edge <input type="color" id="fEdge"></label>
+  <label>Center <input type="color" id="fCenter"></label>
+  <label>Stem + leaves <input type="color" id="fStem"></label>
+  <label>Head size <input type="range" id="fHead" min="0.6" max="1.6" step="0.05"></label>
+  <label>Head tilt <input type="range" id="fTilt" min="0" max="90" step="1"></label>
+  <label>Petal count (daisy/sun) <input type="range" id="fPetals" min="8" max="40" step="1"></label>
+  <label>Stem length <input type="range" id="fLen" min="0.8" max="2.8" step="0.1"></label>
+  <label>Stem curve <input type="range" id="fCurve" min="0" max="2" step="0.1"></label>
+  <label>Leaves <select id="fLeaves"><option value="0">None</option><option value="2">2</option><option value="4">4</option></select></label>
+  <label>Leaf size <input type="range" id="fLeafS" min="0.6" max="1.6" step="0.05"></label>
+  <label>Spin <input type="range" id="fSpin" min="0" max="2" step="0.1"></label>
+  <label>Glow <input type="range" id="fGlow" min="0.5" max="2" step="0.05"></label>
+  <button id="fRand">Randomize</button>
+</div>
+
+<!-- Pinned dependency: three.js r128 (global build) from cdnjs -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(() => {
+const $ = id => document.getElementById(id), msg = t => $('msg').textContent = t || '';
+if (typeof THREE === 'undefined'){ msg('Could not load Three.js from the CDN. Check your connection and reload.'); return; }
+let renderer;
+try { renderer = new THREE.WebGLRenderer({canvas:$('gl'), antialias:false, alpha:true, powerPreference:'high-performance'}); }
+catch(e){ msg('WebGL is not available in this browser.'); return; }
+
+const mobile = matchMedia('(pointer:coarse)').matches || innerWidth < 700;
+const MS = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0.4 : 1;   // motion scale (reduced-motion mode)
+renderer.setPixelRatio(Math.min(devicePixelRatio, mobile ? 1.5 : 2));
+renderer.setClearColor(0x000000, 0);
+const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+
+// ---------- tunables ----------
+const CFG = {attract:9, scatterAttract:0.25, zeta:0.7, drag:0.3, maxSpeed:14, flow:0.9,
+             scatterPower:7, formTime:4.5, speed:1, interaction:true, radius:1.3, push:14};
+
+// ---------- helpers ----------
+const rng = s => () => (s = (s*1664525 + 1013904223) >>> 0) / 4294967296;      // seeded: rose is identical every time
+// Palette: crimson / rose red / scarlet / pale pink highlight. r in [0,1) picks the tone, k scales brightness.
+function pal(r, k, C, o){
+  let R, G, B;
+  if (r < .3){R = .5; G = .02; B = .07} else if (r < .65){R = .8; G = .05; B = .12}
+  else if (r < .9){R = 1; G = .14; B = .12} else {R = 1; G = .5; B = .55}
+  C[o] = R*k; C[o+1] = G*k; C[o+2] = B*k;
+}
+
+// ---------- ROSE TARGETS ----------
+// HEAD: 7 rings of petals, inner (j=0, 3 petals) to outer (j=6, 7 petals), each ring rotated by 2.4 rad so
+// seams never line up. Every petal follows a precomputed side profile: it starts leaning outward, bends
+// inward so the walls close like a bud, then its tip rolls back outward (stronger on outer rings), so the
+// silhouette is a cupped rose with flared petal tops. Profile = integrate the lean angle beta(s) along the
+// petal length: rho += sin(beta) ds, y += cos(beta) ds. A petal point is (s up the petal, u across it); the
+// top edge is rounded (smax shrinks with u^2), edges bend up slightly (cupping), and the rim gets a ruffle.
+// 17% of the petal points sit on the rim and are bright pink, so each petal edge reads as a line; bases are
+// dark (shadow between layers). The two innermost rings twist to form the spiral centre.
+// SEPALS: 5 green pointed strips under the head. STEM: curved tube. LEAVES: two compound leaves, each with a
+// petiole and 3 serrated, cupped leaflets, with a bright midrib and slanted side veins.
+const ROSE_NP = [3,3,4,5,5,6,7], ROSE_G = 48, ROSE_PR = [];
+(() => {
+  for (let j = 0; j < 7; j++){
+    const D = Math.PI/180, b0 = (15 + 6.7*j)*D, b1 = (60 + 2.5*j)*D, roll = (10 + 17*j)*D, L = 1.06 - .035*j;
+    const rho = new Float32Array(ROSE_G + 1), y = new Float32Array(ROSE_G + 1); rho[0] = .03 + .02*j;
+    for (let g = 0; g < ROSE_G; g++){
+      const s = g/ROSE_G, b = b0 - b1*s + roll*Math.pow(Math.min(1, Math.max(0, (s - .8)/.2)), 2);
+      rho[g+1] = rho[g] + Math.sin(b)*L/ROSE_G; y[g+1] = y[g] + Math.cos(b)*L/ROSE_G;
+    }
+    ROSE_PR.push({rho, y});
+  }
+})();
+// ---------- FLOWER GENERATORS ----------
+// All flower types use the same point pipeline: a head function returns [x,y,z,shade,kind] for one point
+// (kind 0 = petal body, 1 = lit petal edge, 2 = flower centre), and genFlower adds the shared stem, sepals
+// (rose only) and leaves. Colours come from the customizer (FL), so a change just rebuilds the targets and
+// the same particles morph into the new flower.
+const FL = {type:'rose', petal:'#d4122b', edge:'#e66b7d', center:'#f2c230', stem:'#1f8a3a', head:1, tilt:0, petals:21,
+            len:1.9, curve:1, leaves:2, leafSize:1, spin:1, glow:1, heads:1};
+const TYPE_DEFAULT = {rose:{petal:'#d4122b', edge:'#e66b7d', center:'#f2c230', tilt:0},
+                      tulip:{petal:'#e8456b', edge:'#ff9fb0', center:'#f2c230', tilt:0},
+                      daisy:{petal:'#f4f4ee', edge:'#ffffff', center:'#f2c230', tilt:54, petals:21},
+                      sunflower:{petal:'#f5b800', edge:'#ffe066', center:'#5a3a16', tilt:54, petals:34},
+                      dandelion:{petal:'#e9e9e4', edge:'#ffffff', center:'#8b7a45', tilt:0, curve:.3, len:2.1},
+                      lily:{petal:'#f06aa0', edge:'#ffb3d0', center:'#ffd21f', tilt:25},
+                      lavender:{petal:'#7b4fd1', edge:'#b999ff', center:'#5a2fa0', tilt:0, curve:.5}};
+const rgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)/255);
+const ROSE_CUM = []; let ROSE_TOT = 0; ROSE_NP.forEach((np, j) => ROSE_CUM.push(ROSE_TOT += np*(.5 + .12*j)));
+const roseAt = (arr, s) => { const f = s*ROSE_G, i = Math.min(ROSE_G - 1, f|0); return arr[i] + (arr[i+1] - arr[i])*(f - i); };
+
+function headRose(rnd){                      // layered rose head, see the profile notes above
+  const PI = Math.PI; let q = rnd()*ROSE_TOT, j = 0; while (ROSE_CUM[j] < q && j < 6) j++;
+  const np = ROSE_NP[j], idx = rnd()*np|0, u = rnd()*2 - 1, smax = 1 - .22*u*u, rim = rnd() < .17;
+  const s = rim ? smax*(.93 + .07*rnd()) : Math.sqrt(rnd())*smax;
+  const rho = roseAt(ROSE_PR[j].rho, s)*(1 - .1*u*u) + (rnd() - .5)*.014;
+  const y = roseAt(ROSE_PR[j].y, s) + .05*u*u*(.5 + s) + (s > .8 ? .03*Math.sin(u*5 + j) : 0) + (rnd() - .5)*.014;
+  const wf = .75 + .25*Math.sin(PI*s), th = j*2.4 + idx*2*PI/np + u*(PI/np)*1.5*wf + (j < 2 ? .9*s : 0);
+  return [rho*Math.cos(th), y, rho*Math.sin(th), (.22 + .78*Math.pow(s/smax, 1.5))*(.82 + .26*(j % 2)), rim ? 1 : 0];
+}
+function headTulip(rnd){                     // 2 rings of 3 tepals forming a closed goblet with pointed tips
+  const PI = Math.PI, r = rnd() < .5 ? 0 : 1, k = rnd()*3|0, u = rnd()*2 - 1, smax = 1 - .25*Math.abs(u), rim = rnd() < .15;
+  const s = rim ? smax*(.93 + .07*rnd()) : Math.sqrt(rnd())*smax, R = r ? .5 : .56, wf = .7 + .3*Math.sin(PI*Math.min(1, s*1.05));
+  const th = r*PI/3 + k*2*PI/3 + u*(PI/3)*1.05*wf;
+  const rho = R*(.25 + .75*Math.sin(PI*Math.pow(s, .8)*.78))*(1 - .45*Math.pow(s, 5)) + (rnd() - .5)*.01;
+  return [rho*Math.cos(th), 1.2*s*(r ? .96 : 1), rho*Math.sin(th), (.3 + .7*Math.pow(s/smax, 1.3))*(.85 + .2*r), rim ? 1 : 0];
+}
+// Dandelion: a puffball. Each point is on a straight filament from the seed core outward in a random
+// direction; 30% sit in a small cluster at the filament tip (the feathery pappus), drawn in the edge colour.
+function headDandelion(rnd){
+  const u = rnd()*2 - 1, f = rnd()*6.2832, q = Math.sqrt(1 - u*u), t = Math.pow(rnd(), .8), tuft = rnd() < .3;
+  const r = tuft ? .52 : .06 + .46*t, sp = tuft ? .09 : .012;
+  return [q*Math.cos(f)*r + (rnd() - .5)*sp, u*r + .5 + (rnd() - .5)*sp, q*Math.sin(f)*r + (rnd() - .5)*sp,
+          tuft ? .9 + .1*rnd() : .35 + .6*t, tuft ? 1 : r < .12 ? 2 : 0];
+}
+// Lily: 6 pointed tepals (two rings of 3) whose profile starts upright then recurves outward and down,
+// plus 6 stamens (curved filaments with an anther blob). Profile integrated once into LILY_R / LILY_Y.
+const LILY_G = 32, LILY_R = new Float32Array(LILY_G + 1), LILY_Y = new Float32Array(LILY_G + 1); LILY_R[0] = .03;
+for (let g = 0; g < LILY_G; g++){ const b = (18 + 125*Math.pow(g/LILY_G, 1.6))*Math.PI/180;
+  LILY_R[g+1] = LILY_R[g] + Math.sin(b)*1.05/LILY_G; LILY_Y[g+1] = LILY_Y[g] + Math.cos(b)*1.05/LILY_G; }
+const lilyAt = (a, s) => { const f = s*LILY_G, i = Math.min(LILY_G - 1, f|0); return a[i] + (a[i+1] - a[i])*(f - i); };
+function headLily(rnd){
+  const PI = Math.PI;
+  if (rnd() < .12){
+    const k = rnd()*6|0, t = rnd(), a = k*PI/3 + .3, r = .04 + .42*Math.pow(t, 1.5), blob = t > .9, j = blob ? (rnd() - .5)*.05 : 0;
+    return [r*Math.cos(a) + j, .1 + .9*t + j, r*Math.sin(a), blob ? 1 : .7, 2];
+  }
+  const ring = rnd() < .5 ? 0 : 1, k = rnd()*3|0, u = rnd()*2 - 1, rim = rnd() < .14, smax = 1 - .3*Math.abs(u);
+  const s = rim ? smax*(.94 + .06*rnd()) : Math.sqrt(rnd())*smax, w = .2*Math.pow(Math.sin(PI*Math.min(1, s*.95 + .03)), .6)*(ring ? .9 : 1);
+  const rho = lilyAt(LILY_R, s), th = ring*PI/3 + k*2*PI/3 + u*Math.min(w/Math.max(rho, .1), .6);
+  const y = lilyAt(LILY_Y, s) + .06*(1 - u*u) + .02*Math.sin(u*9 + s*6)*s;
+  return [rho*Math.cos(th), y, rho*Math.sin(th), (.3 + .7*Math.pow(s/smax, 1.2))*(.9 + .15*ring), rim ? 1 : 0];
+}
+// Lavender: a tapering spike of 16 whorls, 5 small floret clusters per whorl, rotated 0.9 rad per whorl;
+// the youngest florets near the tip use the lighter edge colour.
+function headLavender(rnd){
+  const M = 16, m = rnd()*M|0, k = rnd()*5|0, tt = (m + .5)/M, a = m*.9 + k*1.2566;
+  const rr = (.11 + .03*Math.sin(Math.PI*tt))*(1 - .35*tt), cl = .05*(1 - .3*tt);
+  return [rr*Math.cos(a) + (rnd() - .5)*2*cl, tt*1.5 + (rnd() - .5)*2.6*cl, rr*Math.sin(a) + (rnd() - .5)*2*cl,
+          .45 + .55*rnd(), tt > .86 && rnd() < .6 ? 1 : 0];
+}
+const DAISY = {P:21, len:.65, wd:.11, cr:.2, cf:.16, sp:30}, SUN = {P:34, len:.55, wd:.13, cr:.4, cf:.38, sp:40};
+function headDaisy(rnd, c){                  // flat disc of petals + patterned centre, tilted to face the viewer
+  const PI = Math.PI; let x, y, z, shade, kind;
+  if (rnd() < c.cf){
+    const th = rnd()*6.2832, rr = c.cr*Math.sqrt(rnd());
+    x = rr*Math.cos(th); z = rr*Math.sin(th); y = .1*(1 - Math.pow(rr/c.cr, 2)) + .03;
+    shade = .55 + .45*Math.abs(Math.sin(rr*c.sp + th*8)); kind = 2;      // seed-spiral-like pattern
+  } else {
+    const k = rnd()*FL.petals|0, u = rnd()*2 - 1, s = rnd(), len = c.len*(.9 + .2*((k*7919 % 13)/13));
+    const rho = c.cr*.9 + len*s, w = c.wd*Math.pow(Math.sin(PI*s), .7), th = k*2*PI/FL.petals + u*w/rho + .15*s;
+    x = rho*Math.cos(th); z = rho*Math.sin(th); y = .06*Math.sin(PI*s) - .05*s*s + .05*u*u;
+    kind = Math.abs(u) > .88 ? 1 : 0; shade = (.7 + .3*s)*(Math.abs(u) < .05 ? .75 : 1);
+  }
+  return [x, y, z, shade, kind];
+}
+function genFlower(n, P, C, o, sc, yo){
+  const rnd = rng(7), B = 1.6, PI = Math.PI, type = FL.type, pc = rgb(FL.petal), ec = rgb(FL.edge), cc = rgb(FL.center), gc = rgb(FL.stem);
+  const head = {rose:headRose, tulip:headTulip, dandelion:headDandelion, lily:headLily, lavender:headLavender}[type] || (r => headDaisy(r, type === 'sunflower' ? SUN : DAISY));
+  const tau = FL.tilt*PI/180, ct = Math.cos(tau), st = Math.sin(tau), nLeaf = +FL.leaves, LF = [[.36,2.2],[.6,5.3],[.2,.9],[.8,3.7]];
+  const H = +FL.heads, nst = n*(.05 + .02*(H - 1))|0, nse = type === 'rose' ? n*.04|0 : 0, nlf = n*.085*nLeaf|0, nb = n - nst - nse - nlf;
+  const stem = u => [.12*FL.curve*Math.sin(u*2.2), -.02 - u*FL.len, .06*FL.curve*Math.sin(u*1.5)];
+  // extra heads sit around the first one on their own curved branches (branch starts at u = ub on the main stem)
+  const HD = [{o:[0, 0, 0], k:1, yaw:0}];
+  for (let i = 1; i < H; i++){ const ya = i*2.4 + .5, r = .55 + .1*i; HD.push({o:[Math.cos(ya)*r, -.1 - .22*(i % 3), Math.sin(ya)*r], k:.78, yaw:ya, ub:.1 + .08*i}); }
+  const green = (a, k) => { C[a] = gc[0]*k; C[a+1] = gc[1]*k; C[a+2] = gc[2]*k; };
+  const leaflet = (b, d, sd, ln, wm) => {                         // serrated, cupped leaflet: [x,y,z,isVein]
+    const s = rnd(), t = rnd()*2 - 1, wd = wm*Math.sin(PI*Math.pow(s, .75))*(1 + .1*((s*14) % 1));
+    const f = s*7 - Math.abs(t)*2.2, vein = Math.abs(t) < .07 || (((f % 1) + 1) % 1) < .09;
+    return [b[0] + d[0]*s*ln + sd[0]*t*wd, b[1] + d[1]*s*ln + sd[1]*t*wd + t*t*wd*.4 - s*s*ln*.18, b[2] + d[2]*s*ln + sd[2]*t*wd, vein];
+  };
+  for (let k = 0; k < n; k++){
+    let x, y, z; const a = (o + k)*3;
+    if (k < nb){
+      const hd = HD[rnd()*H|0], h = head(rnd), hs = FL.head*hd.k, ty0 = (h[1]*ct - h[2]*st)*hs, tz0 = (h[1]*st + h[2]*ct)*hs, tx0 = h[0]*hs;
+      const cy = Math.cos(hd.yaw), sy = Math.sin(hd.yaw);
+      x = tx0*cy + tz0*sy + hd.o[0]; z = -tx0*sy + tz0*cy + hd.o[2]; y = ty0 + hd.o[1]; const sh = h[3];
+      if (h[4] === 2){ C[a] = cc[0]*sh; C[a+1] = cc[1]*sh; C[a+2] = cc[2]*sh; }
+      else if (h[4] === 1){ for (let c = 0; c < 3; c++) C[a+c] = ec[c]*(.9 + .15*sh); }
+      else { for (let c = 0; c < 3; c++) C[a+c] = pc[c]*sh + .02; }
+    } else if (k < nb + nst){
+      const u = rnd(), t = rnd()*6.28; let p = stem(u), w = .03;
+      if (H > 1 && rnd() < .45){ const hd = HD[1 + (rnd()*(H - 1)|0)], sb = stem(hd.ub), q = rnd();
+        p = [sb[0] + (hd.o[0] - sb[0])*q, sb[1] + (hd.o[1] - sb[1])*q + .15*Math.sin(PI*q), sb[2] + (hd.o[2] - sb[2])*q]; w = .022; }
+      x = p[0] + w*Math.cos(t); y = p[1]; z = p[2] + w*Math.sin(t); green(a, .55 + .5*rnd());
+    } else if (k < nb + nst + nse){
+      const sp = rnd()*5|0, s = rnd(), t = rnd()*2 - 1, ang = sp*2*PI/5, w = .07*Math.sin(PI*s)*t, rr = .1 + .5*s;
+      x = rr*Math.cos(ang) - Math.sin(ang)*w; y = -.03 - .36*s*s + .05*s; z = rr*Math.sin(ang) + Math.cos(ang)*w; green(a, .8);
+    } else {
+      const lf = LF[rnd()*nLeaf|0], u0 = lf[0], ang = lf[1], b = stem(u0);
+      let dx = Math.cos(ang)*.9, dy = .45, dz = Math.sin(ang)*.9; const dl = Math.hypot(dx, dy, dz); dx /= dl; dy /= dl; dz /= dl;
+      const sd = [-Math.sin(ang), 0, Math.cos(ang)], q = rnd(); let p;
+      if (q < .1){ const m = rnd()*.45; p = [b[0] + dx*m, b[1] + dy*m, b[2] + dz*m]; green(a, .6); }
+      else {
+        if (q < .55) p = leaflet([b[0] + dx*.45, b[1] + dy*.45, b[2] + dz*.45], [dx, dy, dz], sd, .7*FL.leafSize, .22*FL.leafSize);
+        else {
+          const sg = q < .78 ? 1 : -1, c6 = Math.cos(PI/3), s6 = Math.sin(PI/3);
+          const e = [dx*c6 + sd[0]*sg*s6, dy*c6, dz*c6 + sd[2]*sg*s6], el = Math.hypot(e[0], e[2]) || 1;
+          p = leaflet([b[0] + dx*.27, b[1] + dy*.27, b[2] + dz*.27], e, [e[2]/el, 0, -e[0]/el], .5*FL.leafSize, .16*FL.leafSize);
+        }
+        green(a, p[3] ? 1.3 : .4 + .5*rnd());
+      }
+      x = p[0]; y = p[1]; z = p[2];
+    }
+    P[a] = x*B*sc; P[a+1] = y*B*sc + yo; P[a+2] = z*B*sc;
+  }
+}
+
+// ---------- PARTICLE POOL (typed arrays, one THREE.Points) ----------
+let N = 0, pos, vel, tgt, delay, col, tcol, phase, points, cache = {};
+const mat = new THREE.ShaderMaterial({
+  uniforms:{uTime:{value:0}, uSize:{value:1}, uPx:{value:renderer.getPixelRatio()}, uBoost:{value:1}},
+  vertexShader:`attribute vec3 aColor;attribute float aSize;attribute float aPhase;uniform float uTime,uSize,uPx;varying vec3 vC;varying float vA;
+  void main(){vec4 mv=modelViewMatrix*vec4(position,1.);gl_Position=projectionMatrix*mv;
+  float tw=.8+.2*sin(uTime*1.7+aPhase*6.28);gl_PointSize=clamp(aSize*uSize*uPx*38./-mv.z,1.5,36.);
+  vC=aColor*tw;vA=clamp(1.5-(-mv.z)*.05,.35,1.);}`,
+  fragmentShader:`precision mediump float;varying vec3 vC;varying float vA;uniform float uBoost;
+  void main(){float d=length(gl_PointCoord-.5)*2.;if(d>1.)discard;float core=pow(1.-d,2.2);float halo=exp(-d*d*4.)*.35;
+  gl_FragColor=vec4(vC*uBoost*(core*1.2+halo),(core+halo)*vA);}`,
+  transparent:true, depthWrite:false, blending:THREE.AdditiveBlending
+});
+
+function build(n){
+  N = n; pos = new Float32Array(N*3); vel = new Float32Array(N*3); tgt = new Float32Array(N*3);
+  col = new Float32Array(N*3); tcol = new Float32Array(N*3); delay = new Float32Array(N);
+  phase = new Float32Array(N); const size = new Float32Array(N);
+  for (let i = 0; i < N; i++){
+    const a = i*3, r = 6*Math.cbrt(Math.random()), th = Math.random()*6.2832, ph = Math.acos(2*Math.random() - 1);
+    pos[a] = r*Math.sin(ph)*Math.cos(th); pos[a+1] = r*Math.cos(ph)*.8; pos[a+2] = r*Math.sin(ph)*Math.sin(th)*1.1;
+    vel[a] = (Math.random() - .5)*.8; vel[a+1] = (Math.random() - .5)*.8; vel[a+2] = (Math.random() - .5)*.8;
+    pal(Math.random(), .8, col, a); size[i] = .5 + Math.pow(Math.random(), 3)*2.2; phase[i] = Math.random();
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
+  geo.setAttribute('aColor', new THREE.BufferAttribute(col, 3).setUsage(THREE.DynamicDrawUsage));
+  geo.setAttribute('aSize', new THREE.BufferAttribute(size, 1));
+  geo.setAttribute('aPhase', new THREE.BufferAttribute(phase, 1));
+  if (!points){ points = new THREE.Points(geo, mat); points.frustumCulled = false; scene.add(points); }
+  else { points.geometry.dispose(); points.geometry = geo; }                   // free old GPU buffers
+  cache = {}; startFormation(form);
+}
+
+// ---------- FORMATIONS & TARGET ASSIGNMENT ----------
+let form = 'scatter', kBase = CFG.scatterAttract, transT = 0, attrMul = 1, explDrag = 0, pending = null;
+function getFormation(name){
+  if (name !== 'scatter' && cache[name]) return cache[name];
+  const P = new Float32Array(N*3), C = new Float32Array(N*3);
+  if (name === 'scatter'){
+    for (let i = 0; i < N; i++){
+      const a = i*3, r = 6.5*Math.cbrt(Math.random()), th = Math.random()*6.2832, ph = Math.acos(2*Math.random() - 1);
+      P[a] = r*Math.sin(ph)*Math.cos(th); P[a+1] = r*Math.cos(ph)*.8; P[a+2] = r*Math.sin(ph)*Math.sin(th)*1.1;
+      pal(Math.random(), .8, C, a);
+    }
+    return {P, C};
+  }
+  genFlower(N, P, C, 0, 1, 0);
+  return cache[name] = {P, C};
+}
+// Assignment happens ONCE per formation change (never per frame). Particles and targets are both sorted by
+// x + 0.4y and matched in order, so particles on the left go to the left side of the shape (little crossing
+// through the centre). delay[] = normalised travel distance, so nearby particles start arriving first.
+function assign(F){
+  const ip = Array.from({length:N}, (_, i) => i), it = ip.slice(), kp = new Float32Array(N), kt = new Float32Array(N);
+  for (let i = 0; i < N; i++){ kp[i] = pos[i*3] + .4*pos[i*3+1]; kt[i] = F.P[i*3] + .4*F.P[i*3+1]; }
+  ip.sort((a, b) => kp[a] - kp[b]); it.sort((a, b) => kt[a] - kt[b]);
+  let md = 1e-3;
+  for (let j = 0; j < N; j++){
+    const i = ip[j]*3, t = it[j]*3;
+    tgt[i] = F.P[t]; tgt[i+1] = F.P[t+1]; tgt[i+2] = F.P[t+2]; tcol[i] = F.C[t]; tcol[i+1] = F.C[t+1]; tcol[i+2] = F.C[t+2];
+    const d = Math.hypot(tgt[i] - pos[i], tgt[i+1] - pos[i+1], tgt[i+2] - pos[i+2]); delay[ip[j]] = d; if (d > md) md = d;
+  }
+  for (let i = 0; i < N; i++) delay[i] = delay[i]/md*.45 + Math.random()*.15;
+}
+function startFormation(name){
+  try { assign(getFormation(name)); form = name; transT = 0; kBase = name === 'scatter' ? CFG.scatterAttract : CFG.attract; }
+  catch(e){ console.error(e); msg('Could not generate "' + name + '" targets; keeping the current state.'); }
+}
+// Explosion: each particle gets an impulse along (position - centre) plus random jitter, faster for outer
+// particles; spring attraction is switched off (attrMul=0) and extra drag slowly brakes them, so they drift.
+function explode(power){
+  power *= MS < 1 ? .6 : 1;
+  for (let i = 0; i < N; i++){
+    const a = i*3, ox = pos[a], oy = pos[a+1] - .3, oz = pos[a+2], len = Math.hypot(ox, oy, oz) || 1;
+    let dx = ox/len + (Math.random() - .5)*.9, dy = oy/len + (Math.random() - .5)*.9, dz = oz/len + (Math.random() - .5)*.9;
+    const dl = Math.hypot(dx, dy, dz) || 1, sp = (.4 + Math.random()*1.1)*power*(1 + .25*len);
+    vel[a] += dx/dl*sp; vel[a+1] += dy/dl*sp; vel[a+2] += dz/dl*sp;
+  }
+  attrMul = 0; explDrag = 1.4;
+}
+// Manual navigation: if a shape is showing, burst into a scatter first, then assemble the requested shape.
+function goTo(name, forceScatter){
+  auto = false; updatePlay();
+  if (forceScatter || (form !== 'scatter' && form !== name)){
+    explode(CFG.scatterPower*.6); startFormation('scatter'); pending = {name, t:1.3};
+  } else { pending = null; startFormation(name); }
+}
+
+// ---------- STATE MACHINE ----------
+// One clock (seqT) advanced in the frame loop, no setTimeout, so states cannot overlap. Each state runs
+// its on-enter action once and lasts d seconds; the sequence loops from BLOOM AGAIN back to INSTABILITY.
+const SEQ = [
+  {n:'AWAKENING',        d:6,   on:() => startFormation('scatter')},
+  {n:'FIRST ATTRACTION', d:5,   on:() => startFormation('rose')},
+  {n:'BLOOM',            d:7,   on:() => {}},
+  {n:'INSTABILITY',      d:3.5, on:() => {}, jitter:true},
+  {n:'RELEASE',          d:4,   on:() => { explode(CFG.scatterPower); startFormation('scatter'); }},
+  {n:'REFORM',           d:5,   on:() => startFormation('rose')},
+  {n:'BLOOM AGAIN',      d:7,   on:() => {}}
+];
+let auto = true, seqI = 0, seqT = 0;
+function enter(i){ seqI = i; seqT = 0; pending = null; SEQ[i].on(); }
+function updatePlay(){ $('bPlay').textContent = auto ? 'Pause' : 'Play'; }
+
+// ---------- CAMERA ----------
+const cam = {az:0, el:.12, dist:11, ty:0}; let uaz = 0, uel = 0;
+function updateCamera(dt, time){
+  const fit = Math.max(1, 1.05/camera.aspect); let d, ty, az, el = .12;
+  if (form === 'rose'){ d = 4.6 + 1.1*(FL.len + 1) + .35*(FL.heads - 1); ty = (1 - FL.len)*.8; az = time*.2*MS*FL.spin; el = .3; }
+  else { d = (explDrag > .3 ? 12.5 : 10.5 + 1.5*Math.sin(time*.15)*MS); ty = 0; az = time*.04*MS; }
+  const k = Math.min(1, dt*1.2);
+  cam.dist += (d*fit - cam.dist)*k; cam.ty += (ty - cam.ty)*k; cam.az += (az - cam.az)*k; cam.el += (el - cam.el)*k;
+  const A = cam.az + uaz, E = Math.max(-1.2, Math.min(1.2, cam.el + uel));
+  camera.position.set(Math.sin(A)*Math.cos(E)*cam.dist, Math.sin(E)*cam.dist + cam.ty, Math.cos(A)*Math.cos(E)*cam.dist);
+  camera.lookAt(0, cam.ty, 0); camera.updateMatrixWorld();
+}
+
+// ---------- POINTER / TOUCH ----------
+const ptr = {sx:0, sy:0, on:false, s:0}, pts = new Map(), cv = $('gl');
+const setPtr = e => { ptr.sx = e.clientX/innerWidth*2 - 1; ptr.sy = -e.clientY/innerHeight*2 + 1; ptr.on = true; };
+cv.addEventListener('pointerdown', e => { pts.set(e.pointerId, {x:e.clientX, y:e.clientY}); cv.setPointerCapture(e.pointerId); if (pts.size < 2) setPtr(e); });
+cv.addEventListener('pointermove', e => {
+  const p = pts.get(e.pointerId), dx = p ? e.clientX - p.x : 0, dy = p ? e.clientY - p.y : 0;
+  if (e.pointerType === 'mouse'){
+    if (e.buttons & 1){ uaz -= dx*.005; uel += dy*.005; ptr.on = false; } else setPtr(e);   // drag = orbit, hover = repel
+  } else if (pts.size >= 2){ uaz -= dx*.005/pts.size; uel += dy*.005/pts.size; ptr.on = false; }  // two fingers = orbit
+  else if (p) setPtr(e);                                                                      // one finger = force field
+  if (p){ p.x = e.clientX; p.y = e.clientY; }
+});
+const up = e => { pts.delete(e.pointerId); if (e.pointerType !== 'mouse' || e.type === 'pointerleave') ptr.on = false; };
+['pointerup', 'pointercancel', 'pointerleave'].forEach(t => cv.addEventListener(t, up));
+const _v = new THREE.Vector3(), _d = new THREE.Vector3(), _f = new THREE.Vector3(), _p = new THREE.Vector3();
+function ptrWorld(){            // intersect pointer ray with the plane through the look-at point facing the camera
+  _v.set(ptr.sx, ptr.sy, .5).unproject(camera); _d.copy(_v).sub(camera.position).normalize();
+  camera.getWorldDirection(_f); _p.set(0, cam.ty, 0).sub(camera.position);
+  return _v.copy(camera.position).addScaledVector(_d, _p.dot(_f)/_d.dot(_f));
+}
+
+// ---------- SIMULATION STEP ----------
+// Per particle: a = spring*(target-pos)*act - c*vel + flow noise + swirl (scatter) + pointer repulsion.
+// act ramps 0..1 per particle (staggered by delay[]) so the shape builds progressively; flow fades out as
+// the particle nears its target (fl scales with distance) so shapes settle instead of staying turbulent.
+function step(dt, time){
+  const sc = form === 'scatter', k = kBase*attrMul, c = 2*CFG.zeta*Math.sqrt(k) + CFG.drag + explDrag;
+  const prog = sc ? 1 : Math.min(1, transT/(CFG.formTime/CFG.speed)), ms2 = CFG.maxSpeed*CFG.maxSpeed, fl0 = CFG.flow*MS;
+  const ci = Math.min(1, dt*2.5), R = CFG.radius, R2 = R*R, pr = ptr.s > .02 && CFG.interaction;
+  let qx = 0, qy = 0, qz = 0; if (pr){ const w = ptrWorld(); qx = w.x; qy = w.y; qz = w.z; }
+  for (let i = 0; i < N; i++){
+    const a = i*3; let x = pos[a], y = pos[a+1], z = pos[a+2], vx = vel[a], vy = vel[a+1], vz = vel[a+2];
+    const dx = tgt[a] - x, dy = tgt[a+1] - y, dz = tgt[a+2] - z, dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+    let act = 1; if (!sc && prog < 1){ const q = (prog - delay[i])/.4; act = q <= 0 ? 0 : q >= 1 ? 1 : q*q*(3 - 2*q); }
+    const kk = k*act, fl = sc ? fl0 : fl0*Math.min(1, dist*.6)*(1 - .7*act), ph = phase[i]*6.28;
+    let ax = dx*kk - vx*c + Math.sin(y*1.7 + time*.6 + ph)*fl;
+    let ay = dy*kk - vy*c + Math.sin(z*1.3 + time*.5 + ph*1.7)*fl;
+    let az = dz*kk - vz*c + Math.sin(x*1.5 + time*.55 + ph*.6)*fl;
+    if (sc){ ax -= z*.05*MS; az += x*.05*MS; }
+    if (pr){
+      const ex = x - qx, ey = y - qy, ez = z - qz, d2 = ex*ex + ey*ey + ez*ez;
+      if (d2 < R2 && d2 > 1e-6){ const d = Math.sqrt(d2), t = 1 - d/R, f = t*t*CFG.push*ptr.s/d; ax += ex*f; ay += ey*f; az += ez*f; }
+    }
+    vx += ax*dt; vy += ay*dt; vz += az*dt;
+    const s2 = vx*vx + vy*vy + vz*vz; if (s2 > ms2){ const q = CFG.maxSpeed/Math.sqrt(s2); vx *= q; vy *= q; vz *= q; }
+    vel[a] = vx; vel[a+1] = vy; vel[a+2] = vz; pos[a] = x + vx*dt; pos[a+1] = y + vy*dt; pos[a+2] = z + vz*dt;
+    col[a] += (tcol[a] - col[a])*ci; col[a+1] += (tcol[a+1] - col[a+1])*ci; col[a+2] += (tcol[a+2] - col[a+2])*ci;
+  }
+  const g = points.geometry.attributes; g.position.needsUpdate = true; g.aColor.needsUpdate = true;
+}
+
+// ---------- MAIN LOOP ----------
+let last = performance.now(), time = 0, raf = 0, fAcc = 0, fN = 0, adapt = 0;
+function loop(now){
+  raf = requestAnimationFrame(loop);
+  const dt = Math.min((now - last)/1000, 1/30); last = now;
+  if (document.hidden) return;
+  time += dt; transT += dt; attrMul = Math.min(1, attrMul + dt/2.5); explDrag = Math.max(0, explDrag - dt*.4);
+  if (auto){
+    seqT += dt; const s = SEQ[seqI];
+    if (s.jitter) for (let n = 0; n < 12; n++){ const a = (Math.random()*N|0)*3; vel[a] += (Math.random() - .5)*2.5; vel[a+1] += (Math.random() - .5)*2.5; vel[a+2] += (Math.random() - .5)*2.5; }
+    if (seqT >= s.d) enter(seqI + 1 >= SEQ.length ? 3 : seqI + 1);
+  }
+  if (pending && (pending.t -= dt) <= 0){ const n = pending.name; pending = null; startFormation(n); }
+  ptr.s += ((ptr.on ? 1 : 0) - ptr.s)*Math.min(1, dt*10);
+  updateCamera(dt, time); step(dt, time);
+  mat.uniforms.uTime.value = time;
+  mat.uniforms.uBoost.value += ((form === 'scatter' ? 1.25 : 1)*FL.glow - mat.uniforms.uBoost.value)*Math.min(1, dt*2);
+  renderer.render(scene, camera);
+  $('st').textContent = auto ? SEQ[seqI].n : 'MANUAL · ' + form.toUpperCase();
+  // quality monitor: if the average frame time stays high, drop the particle count (max twice)
+  fAcc += dt; if (++fN === 120){ if (fAcc/fN > .034 && N > 3000 && adapt < 2){ adapt++; setCount(Math.max(3000, N*.7|0)); } fAcc = fN = 0; }
+}
+function setCount(n){ if (![...$('cnt').options].some(o => +o.value === n)) $('cnt').add(new Option(n, n)); $('cnt').value = n; build(n); }
+
+// ---------- UI ----------
+const resize = () => { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix(); mat.uniforms.uPx.value = renderer.getPixelRatio(); };
+addEventListener('resize', resize); resize();
+$('bPlay').onclick = () => {
+  if (auto){ auto = false; } else {                         // resume at a state that matches what is on screen
+    auto = true; enter({scatter:1, rose:3}[form]);
+  } updatePlay();
+};
+$('bRose').onclick = () => goTo('rose');
+$('bScat').onclick = () => { auto = false; updatePlay(); pending = null; explode(CFG.scatterPower); startFormation('scatter'); };
+$('bReset').onclick = () => { auto = true; updatePlay(); uaz = uel = 0; explode(CFG.scatterPower*.5); enter(0); };
+$('bCam').onclick = () => { uaz = uel = 0; };
+$('bInt').onclick = e => { CFG.interaction = !CFG.interaction; e.target.classList.toggle('on', CFG.interaction); e.target.textContent = 'Interaction: ' + (CFG.interaction ? 'on' : 'off'); };
+$('bFs').onclick = () => { try { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen(); } catch(e){ msg('Fullscreen is not available here.'); } };
+$('cnt').onchange = e => build(+e.target.value);
+$('size').oninput = e => mat.uniforms.uSize.value = +e.target.value;
+$('spd').oninput = e => CFG.speed = +e.target.value;
+$('sca').oninput = e => CFG.scatterPower = +e.target.value;
+// keep the tag in the bottom-right corner, just above the control bar (or at the edge when the bar is hidden)
+const placeTag = () => { const ui = $('ui'); $('tag').style.bottom = (ui.classList.contains('hide') ? 8 : ui.offsetHeight + 8) + 'px'; };
+const toggleUI = () => { $('ui').classList.toggle('hide'); placeTag(); };
+if (window.ResizeObserver) new ResizeObserver(placeTag).observe($('ui')); addEventListener('resize', placeTag); placeTag();
+$('tog').onclick = toggleUI;
+const onKey = e => { if (e.key === 'h' || e.key === 'H') toggleUI(); };
+addEventListener('keydown', onKey);
+// release GPU resources and listeners when the page goes away
+addEventListener('pagehide', () => {
+  cancelAnimationFrame(raf); removeEventListener('resize', resize); removeEventListener('keydown', onKey);
+  if (points) points.geometry.dispose(); mat.dispose(); renderer.dispose();
+});
+
+// ---------- CUSTOMIZER ----------
+// Each control is [element id, FL key]. "Shape" controls rebuild the flower targets (debounced, the same
+// particles morph); "live" controls (spin, glow, dots) take effect immediately.
+const SHAPE = [['fHeads','heads'],['fPetal','petal'],['fEdge','edge'],['fCenter','center'],['fStem','stem'],['fHead','head'],['fTilt','tilt'],
+               ['fPetals','petals'],['fLen','len'],['fCurve','curve'],['fLeaves','leaves'],['fLeafS','leafSize']];
+const LIVE = [['fSpin','spin'],['fGlow','glow']];
+const syncUI = () => { $('fType').value = FL.type; SHAPE.concat(LIVE).forEach(([id, k]) => $(id).value = FL[k]); };
+let refreshT = 0;
+const refresh = () => { clearTimeout(refreshT); refreshT = setTimeout(() => { cache = {}; if (form === 'rose') startFormation('rose'); }, 120); };
+const val = e => e.target.type === 'color' ? e.target.value : +e.target.value;
+SHAPE.forEach(([id, k]) => $(id).addEventListener('input', e => { FL[k] = val(e); refresh(); }));
+LIVE.forEach(([id, k]) => $(id).addEventListener('input', e => { FL[k] = val(e); }));
+$('fType').addEventListener('input', e => { FL.type = e.target.value; Object.assign(FL, TYPE_DEFAULT[FL.type]); syncUI(); refresh(); });
+$('fRand').onclick = () => {
+  const pick = a => a[Math.random()*a.length|0], R = (a, b) => a + Math.random()*(b - a);
+  const hex = (h, sat, l) => { const g = document.createElement('canvas').getContext('2d'); g.fillStyle = `hsl(${h|0} ${sat|0}% ${l|0}%)`; return g.fillStyle; };
+  FL.type = pick(['rose','tulip','daisy','sunflower','dandelion','lily','lavender']); FL.heads = pick([1, 1, 2, 3, 5]); Object.assign(FL, TYPE_DEFAULT[FL.type]);
+  const h = R(0, 360); FL.petal = hex(h, R(65, 95), R(42, 62)); FL.edge = hex(h + R(-15, 15), R(70, 100), R(68, 82));
+  FL.center = hex(R(25, 60), 90, R(45, 55)); FL.stem = hex(R(95, 150), 55, R(28, 40));
+  FL.head = +R(.8, 1.3).toFixed(2); FL.len = +R(1.2, 2.5).toFixed(1); FL.curve = +R(0, 1.8).toFixed(1);
+  FL.leaves = pick([0, 2, 4]); FL.leafSize = +R(.8, 1.4).toFixed(2); FL.petals = R(12, 36)|0; FL.tilt = FL.type === 'rose' || FL.type === 'tulip' ? R(0, 30)|0 : R(30, 70)|0;
+  syncUI(); refresh();
+};
+$('bCust').onclick = () => $('cust').classList.toggle('hide');
+if (mobile) $('cust').classList.add('hide');
+syncUI();
+
+// ---------- START ----------
+const initN = mobile ? 6000 : 12000; $('cnt').value = initN;
+Promise.race([document.fonts ? document.fonts.ready : Promise.resolve(), new Promise(r => setTimeout(r, 1500))])
+  .catch(() => {}).then(() => { build(initN); enter(0); updatePlay(); raf = requestAnimationFrame(loop); });
+})();
+</script>
+</body>
+</html>
